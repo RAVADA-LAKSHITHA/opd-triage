@@ -103,17 +103,26 @@ The final level is always the **more urgent** of the rule level and the model le
                  use_container_width=True, hide_index=True)
 
 # ---------------- Metrics ----------------
+# ---------------- Metrics ----------------
 with tab3:
-    if os.path.exists("reports/metrics.json"):
-        m = json.load(open("reports/metrics.json"))
+    def show(path, title):
+        if not os.path.exists(path):
+            st.info(f"{path} not found. Run `python -m src.triage.evaluate`.")
+            return
+        m = json.load(open(path))
+        st.markdown(f"#### {title}")
         a, b, c, d = st.columns(4)
         a.metric("Emergency sensitivity (strict)", f"{m['emergency_recall_strict']:.1%}")
         b.metric("Sensitivity (abstain = safe)", f"{m['emergency_recall_with_abstain']:.1%}")
         c.metric("Emergencies missed", f"{m['emergencies_missed']} / {m['n_emergencies']}")
-        d.metric("Mean cost vs all-L4 baseline", f"{m['mean_cost']:.2f} vs {m['baseline_cost_all_level4']:.2f}")
-        st.json(m)
-    else:
-        st.info("Run `python -m src.triage.evaluate` to generate reports/metrics.json")
+        d.metric("Mean cost (naive L4 baseline)", f"{m['mean_cost']:.2f} ({m['baseline_cost_all_level4']:.2f})")
+        with st.expander("All metrics"):
+            st.json(m)
+
+    show("reports/metrics.json", "Standard synthetic holdout (optimistic)")
+    show("reports/metrics_hard.json", "Stress test: noisy, overlapping inputs")
+    st.caption("The stress test shows what happens when complaints and vitals stop giving the game away: "
+               "escalation precision drops and some emergencies become hard to detect from the intake form alone.")
 
 # ---------------- Queue demo ----------------
 with tab4:
@@ -137,3 +146,5 @@ with tab4:
             "Triage queue": [res["emergency_wait_priority"], res["all_wait_priority"]],
         }, index=["Emergencies", "All patients"]))
         st.caption("Simulated with synthetic arrivals. Replace with the provided arrival log when available.")
+
+

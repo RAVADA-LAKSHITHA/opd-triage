@@ -33,6 +33,40 @@ Measured on 5,000 unseen synthetic holdout records (208 true emergencies). Synth
 Wait simulation assumptions: 2 doctors, 7 minute consult, one arrival every 4 minutes.
 <!-- RESULTS:END -->
 
+## Stress test (harder, noisier holdout)
+
+The standard holdout comes from the same templates as training, so it is optimistic. To see how the
+system behaves when inputs stop being clean, `src/triage/generate_hard.py` builds a second holdout
+(5,000 records, same labels) where 30% of emergencies are described with a mild-sounding complaint,
+30% of emergencies have near-normal vitals, 8% of non-emergencies use emergency words, and 7% of
+non-emergencies have abnormal-looking pulse/SpO2. The model is **not** retrained on it.
+
+| Metric | Standard holdout | Stress test |
+|---|---|---|
+| Emergency sensitivity (strict) | 100.0% | 85.1% |
+| Emergencies missed entirely | 0 of 208 | 27 of 201 |
+| Mean cost (best naive baseline) | 0.036 (2.112) | 0.602 (2.078) |
+| Level / department accuracy | 97.8% / 98.2% | 86.3% / 86.5% |
+| Under-triage / over-triage | 0.46% / 1.78% | 1.26% / 12.46% |
+| Patients escalated / precision of escalation | 4.3% / 96.3% | 13.8% / 24.8% |
+| Simulated emergency wait, FCFS -> triage queue | 9.0 -> 1.8 min | 9.2 -> 4.6 min |
+
+What we take from it:
+
+- **Still far better than naive baselines** (mean cost 0.60 vs 2.08 for the best "everyone gets the same level" baseline).
+- **Lowering the escalation threshold does not recover the missed emergencies.** Sweeping it from 0.50 down to 0.03
+  moves sensitivity from 77.1% to 85.6% and is flat below 0.05, while escalations keep rising, so we keep 0.05. The
+  remaining misses look like mild patients on the intake form (mild complaint and normal vitals), so no cutoff can
+  separate them. In practice that argues for a nurse re-check and red-flag screening questions, not a different threshold.
+- **The cost of safety is workload.** About 14% of patients are escalated at 25% precision (~110 escalations/day
+  at 800 walk-ins, versus ~32 true emergencies). About 60% of escalations are driven by the hard rules, which override the model by design.
+  A real deployment would tune those rules with clinicians against real data.
+- Non-emergencies sent to level 1 can jump ahead of true level-2 patients, which is why the simulated queue gain
+  shrinks from 80% to 50%.
+
+Reproduce: `python -m src.triage.generate_hard --n 5000 --out data/holdout_hard.csv` then
+`python -m src.triage.evaluate --data data/holdout_hard.csv --out reports/metrics_hard.json`.
+
 ## How it works
 
 ```
