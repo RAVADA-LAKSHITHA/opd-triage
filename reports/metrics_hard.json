@@ -1,0 +1,23 @@
+{
+  "n": 5000,
+  "n_emergencies": 201,
+  "mean_cost": 0.6022,
+  "baseline_cost_all_level4": 2.7468,
+  "baseline_cost_all_level3": 2.0778,
+  "emergency_recall_strict": 0.8507462686567164,
+  "emergency_recall_with_abstain": 0.8656716417910447,
+  "emergencies_missed": 27,
+  "emergency_under_triage_rate": 0.15920398009950248,
+  "level_accuracy": 0.8628,
+  "department_accuracy": 0.8648,
+  "under_triage_rate": 0.0126,
+  "over_triage_rate": 0.1246,
+  "abstain_rate": 0.028,
+  "abstain_precision": 0.7928571428571428,
+  "rules_override_rate": 0.0822,
+  "emergency_wait_fcfs": 9.201343015888929,
+  "emergency_wait_priority": 4.620701111258305,
+  "emergency_wait_reduction_pct": 49.78231869761562,
+  "all_wait_fcfs": 9.201627733735053,
+  "all_wait_priority": 9.201627733735053
+}
