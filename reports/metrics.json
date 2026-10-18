@@ -9,7 +9,7 @@
   "emergencies_missed": 0,
   "emergency_under_triage_rate": 0.0,
   "level_accuracy": 0.9776,
-  "department_accuracy": 0.9828,
+  "department_accuracy": 0.9818,
   "under_triage_rate": 0.0046,
   "over_triage_rate": 0.0178,
   "abstain_rate": 0.008,
