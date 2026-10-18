@@ -91,6 +91,7 @@ class TriageModel:
         out["final_level"] = np.fmin(out["model_level"], out["rule_level"]).astype(int)
         out["abstain"] = (conf < self.abstain_threshold) & ~rule_fired
         out["final_dept"] = np.where(rule_fired, out["rule_dept"], out["model_dept"])
+        out.loc[(out["final_level"] <= 2) & (out["final_dept"] == "General Medicine"), "final_dept"] = "Emergency"
         out["action"] = np.where(
             out["abstain"], "CANNOT ASSESS - send to nurse now",
             np.where(out["final_level"] <= 2, "ESCALATE - doctor now", "Queue by level"))
