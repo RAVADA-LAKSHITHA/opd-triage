@@ -1,6 +1,6 @@
 pandas
 numpy
 scikit-learn
+joblib
 streamlit
 pytest
-joblib

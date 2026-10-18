@@ -1,111 +1,99 @@
-"""Cost-sensitive triage model + rules override + abstention."""
+"""ML layer + asymmetric decision + abstention, wrapped by the rules layer."""
 import joblib
 import numpy as np
 import pandas as pd
-from scipy.sparse import csr_matrix, hstack
+from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from .costs import COST
-from .data import add_clean_vitals, add_rule_outputs
+from .rules import apply_rules, clean_vitals
 
-NUM_COLS = ["age", "sbp_c", "dbp_c", "pulse_c", "temp_c", "spo2_c"]
-MISS_COLS = ["sbp_missing", "dbp_missing", "pulse_missing", "temp_missing", "spo2_missing"]
-CONDITIONS = ["diabetes", "hypertension", "asthma", "CAD", "CKD", "thyroid"]
+LEVELS = np.arange(1, 6)
+W_EMERG = 20.0        # under-triaging a true emergency (level<=2) costs 20x an over-triage step
+ABSTAIN_COST = 1.0    # cost of sending a patient to the nurse for manual assessment
+ABSTAIN_TAU = 1.0     # abstain when the best achievable expected cost exceeds this
+NUM = ["age", "sbp", "dbp", "pulse", "temp_c", "spo2"]
+ALIASES = {"bp_sys": "sbp", "bp_dia": "dbp", "temp": "temp_c", "chief_complaint": "complaint",
+           "triage": "triage_level", "level": "triage_level", "dept": "department"}
 
 
-class TriageModel:
-    def __init__(self, abstain_threshold: float = 0.60):
-        self.abstain_threshold = abstain_threshold
-        self.tfidf = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4),
-                                     max_features=5000, sublinear_tf=True, lowercase=True)
-        self.imputer = SimpleImputer(strategy="median")
-        self.scaler = StandardScaler()
-        self.level_clf = LogisticRegression(max_iter=2000, C=5.0)
-        self.dept_clf = LogisticRegression(max_iter=2000, C=5.0)
+def cost_matrix():
+    """C[true-1, pred-1]. Under-triage = (pred-true)*weight, over-triage = (true-pred)*1."""
+    C = np.zeros((5, 5))
+    for t in LEVELS:
+        for p in LEVELS:
+            C[t - 1, p - 1] = (p - t) * (W_EMERG if t <= 2 else 1.0) if p > t else (t - p)
+    return C
 
-    # ---------- features ----------
-    def _build(self, df, fit=False):
-        d = add_clean_vitals(df.reset_index(drop=True))
-        d["complaint"] = d["complaint"].fillna("").astype(str)
-        conds = d["conditions"].fillna("none").astype(str)
 
-        extra = pd.DataFrame({
-            "spo2_lt93": (d.spo2_c < 93).astype(int),
-            "sbp_lt90": (d.sbp_c < 90).astype(int),
-            "pulse_gt130": (d.pulse_c > 130).astype(int),
-            "temp_ge39": (d.temp_c >= 39).astype(int),
-            "sex_m": (d.sex == "M").astype(int),
-        })
-        for c in CONDITIONS:
-            extra["cond_" + c] = conds.str.contains(c).astype(int)
-        extra = pd.concat([extra, d[MISS_COLS].reset_index(drop=True)], axis=1)
+COST = cost_matrix()
 
-        if fit:
-            num = self.imputer.fit_transform(d[NUM_COLS])
-            text = self.tfidf.fit_transform(d["complaint"])
-            dense = self.scaler.fit_transform(np.hstack([num, extra.values]))
-        else:
-            num = self.imputer.transform(d[NUM_COLS])
-            text = self.tfidf.transform(d["complaint"])
-            dense = self.scaler.transform(np.hstack([num, extra.values]))
-        return hstack([text, csr_matrix(dense)]).tocsr()
 
-    # ---------- train ----------
+def prep(df):
+    """Rename aliases, clean vitals (0 BP, 96C...), build model input."""
+    df = df.rename(columns={k: v for k, v in ALIASES.items() if k in df.columns and v not in df.columns}).copy()
+    for c in ["sbp", "dbp", "pulse", "temp_c", "spo2"]:
+        df["raw_" + c] = df[c]                      # rules layer re-cleans these, so bad vitals get flagged
+    cleaned = [clean_vitals(r.sbp, r.dbp, r.pulse, r.temp_c, r.spo2) for r in df.itertuples()]
+    for c, f in zip(["sbp", "dbp", "pulse", "temp_c", "spo2"], ["sbp", "dbp", "pulse", "temp_c", "spo2"]):
+        df[c] = [getattr(v, f) for v, _ in cleaned]
+    df["text"] = (df["complaint"].fillna("").astype(str).str.lower() + " | " + df.get("known_conditions", "").fillna("").astype(str).str.lower())
+    df["sex"] = df["sex"].fillna("?").astype(str)
+    return df
+
+
+def make_pipe():
+    pre = ColumnTransformer([
+        ("txt", TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), min_df=3, sublinear_tf=True), "text"),
+        ("num", Pipeline([("imp", SimpleImputer(strategy="median", add_indicator=True)), ("sc", StandardScaler())]), NUM),
+        ("sex", OneHotEncoder(handle_unknown="ignore"), ["sex"]),
+    ])
+    return Pipeline([("pre", pre), ("clf", LogisticRegression(C=4, max_iter=2000))])
+
+
+class Triager:
     def fit(self, df):
-        X = self._build(df, fit=True)
-        self.level_clf.fit(X, df["triage_level"].values)
-        self.dept_clf.fit(X, df["department"].values)
+        d = prep(df)
+        self.level_m = make_pipe().fit(d, d["triage_level"])
+        self.dept_m = make_pipe().fit(d, d["department"])
         return self
 
-    def _level_proba(self, X):
-        P = np.zeros((X.shape[0], 5))
-        raw = self.level_clf.predict_proba(X)
-        for i, c in enumerate(self.level_clf.classes_):
-            P[:, int(c) - 1] = raw[:, i]
-        return P
+    def predict(self, df, use_cost=True, use_rules=True, tau=ABSTAIN_TAU):
+        """tau=None disables abstention. Returns one row per patient."""
+        d = prep(df)
+        P = np.zeros((len(d), 5))
+        P[:, self.level_m.classes_.astype(int) - 1] = self.level_m.predict_proba(d)
+        exp_cost = P @ COST
+        lvl = (exp_cost.argmin(1) if use_cost else P.argmax(1)) + 1
+        best = exp_cost.min(1)
+        dept = self.dept_m.predict(d).astype(object)
+        abstain = np.zeros(len(d), bool) if tau is None else best > tau
+        flags, reasons, recheck, rule_lvl = [], [], [], np.full(len(d), np.nan)
+        for i, r in enumerate(d.itertuples()):
+            res = apply_rules(r.complaint, r.raw_sbp, r.raw_dbp, r.raw_pulse, r.raw_temp_c, r.raw_spo2) if use_rules else None
+            if res is None:
+                flags.append([]); reasons.append([]); recheck.append([]); continue
+            flags.append(res.red_flags); reasons.append(res.reasons); recheck.append(res.needs_recheck)
+            if res.level is not None:                         # rules override the model
+                rule_lvl[i] = res.level
+                lvl[i] = min(lvl[i], res.level); dept[i] = res.department; abstain[i] = False
+        final = np.where(abstain, 2, lvl)                      # abstain => nurse now (treated as urgent)
+        dept = np.where(abstain, "Nurse review", dept)
+        return pd.DataFrame({"level": final, "model_level": lvl, "department": dept, "abstain": abstain,
+                             "p_emergency": P[:, :2].sum(1), "rule_level": rule_lvl, "red_flags": flags,
+                             "reasons": reasons, "needs_recheck": recheck}, index=df.index)
 
-    # ---------- predict ----------
-    def predict_df(self, df):
-        df = df.reset_index(drop=True)
-        X = self._build(df)
-        P = self._level_proba(X)
+    def triage_one(self, complaint, age=35, sex="M", sbp=None, dbp=None, pulse=None, temp=None, spo2=None, known_conditions="", **kw):
+        row = pd.DataFrame([dict(complaint=complaint, age=age, sex=sex, sbp=sbp, dbp=dbp, pulse=pulse, temp_c=temp,
+                                 spo2=spo2, known_conditions=known_conditions)])
+        return self.predict(row, **kw).iloc[0].to_dict()
 
-        exp_cost = P @ COST                     # expected cost of predicting each level
-        model_level = exp_cost.argmin(axis=1) + 1
-        conf = P.max(axis=1)
-        model_dept = self.dept_clf.predict(X)
-
-        rules = add_rule_outputs(df)[["rule_level", "rule_dept", "rule_flags"]]
-        rule_fired = rules["rule_level"].notna().values
-
-        out = pd.DataFrame({
-            "model_level": model_level,
-            "model_dept": model_dept,
-            "confidence": conf,
-            "p_emergency": P[:, :2].sum(axis=1),
-        })
-        out = pd.concat([out, rules], axis=1)
-        out["final_level"] = np.fmin(out["model_level"], out["rule_level"]).astype(int)
-        out["abstain"] = (conf < self.abstain_threshold) & ~rule_fired
-        out["final_dept"] = np.where(rule_fired, out["rule_dept"], out["model_dept"])
-        out["action"] = np.where(
-            out["abstain"], "CANNOT ASSESS - send to nurse now",
-            np.where(out["final_level"] <= 2, "ESCALATE - doctor now", "Queue by level"))
-        return out
-
-    def predict_one(self, complaint, age=40, sex="M", sbp=None, dbp=None,
-                    pulse=None, temp=None, spo2=None, conditions="none"):
-        row = pd.DataFrame([dict(complaint=complaint, age=age, sex=sex, sbp=sbp, dbp=dbp,
-                                 pulse=pulse, temp=temp, spo2=spo2, conditions=conditions)])
-        return self.predict_df(row).iloc[0].to_dict()
-
-    # ---------- persistence ----------
-    def save(self, path):
+    def save(self, path="models/triage.joblib"):
         joblib.dump(self, path)
 
     @staticmethod
-    def load(path):
+    def load(path="models/triage.joblib"):
         return joblib.load(path)

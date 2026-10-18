@@ -3,6 +3,7 @@
 Runs BEFORE any ML model and overrides it. Triage level 1 = most urgent,
 5 = least urgent (ESI-style).
 """
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -118,6 +119,11 @@ KEYWORD_RULES = [
     ("snake bite", 2, "snake bite", "Emergency"),
     ("poison", 2, "poisoning", "Emergency"),
     ("suicid", 2, "self-harm risk", "Psychiatry"),
+    # Telugu (transliterated)
+    ("gunde noppi", 2, "chest pain", "Cardiology"),
+    ("pakshavatham", 2, "stroke sign", "Neurology"),
+    ("moorcha", 1, "seizure/attack", "Emergency"),
+    ("spruha ledu", 1, "unconscious", "Emergency"),
 ]
 
 
@@ -125,7 +131,7 @@ def keyword_rules(text: str) -> RuleResult:
     r = RuleResult()
     t = (text or "").lower()
     for kw, level, flag, dept in KEYWORD_RULES:
-        if kw in t:
+        if re.search(r"\b" + re.escape(kw), t):   # word-start match: 'fits' != 'benefits'
             if r.level is None or level < r.level:
                 r.level = level
                 r.department = dept

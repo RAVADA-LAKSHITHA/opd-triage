@@ -1,0 +1,40 @@
+{
+  "1. accuracy-optimised ML": {
+    "accuracy": 0.8901666666666667,
+    "within_1": 0.9945,
+    "mean_cost": 0.3233333333333333,
+    "emergency_recall": 0.9549180327868853,
+    "emergencies_missed": 11,
+    "abstain_rate": 0.0
+  },
+  "2. + asymmetric (20x) decision": {
+    "accuracy": 0.869,
+    "within_1": 0.9811666666666666,
+    "mean_cost": 0.1985,
+    "emergency_recall": 0.9877049180327869,
+    "emergencies_missed": 3,
+    "abstain_rate": 0.0
+  },
+  "3. + hard-coded rules": {
+    "accuracy": 0.8593333333333333,
+    "within_1": 0.9746666666666667,
+    "mean_cost": 0.223,
+    "emergency_recall": 0.9877049180327869,
+    "emergencies_missed": 3,
+    "abstain_rate": 0.0
+  },
+  "4. + abstention (FINAL)": {
+    "accuracy": 0.8518333333333333,
+    "within_1": 0.9935,
+    "mean_cost": 0.163,
+    "emergency_recall": 1.0,
+    "emergencies_missed": 0,
+    "abstain_rate": 0.03916666666666667
+  },
+  "department_accuracy_non_abstained": 0.9842150910667823,
+  "wait_time_emergencies": {
+    "fcfs_mean_wait_min": 6.611634860273363,
+    "triage_mean_wait_min": 0.5439829965981774,
+    "reduction_pct": 91.77233758224081
+  }
+}

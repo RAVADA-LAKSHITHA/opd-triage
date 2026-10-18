@@ -42,3 +42,7 @@ def test_mild_fever_no_override():
 def test_most_urgent_wins():
     r = apply_rules("chest pain", spo2=85)   # level 2 keyword + level 1 vitals
     assert r.level == 1
+
+def test_fits_keyword_needs_word_start():
+    assert apply_rules("this will benefit me").level is None
+    assert apply_rules("fits aaye").level == 1
